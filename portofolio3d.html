@@ -1,0 +1,806 @@
+<!DOCTYPE html>
+<html lang="id" class="dark">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Scrollytelling Portfolio — Three.js & GSAP</title>
+
+    <!-- Tailwind CSS untuk Styling UI & Layout -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- Google Fonts -->
+    <link
+        href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;600;700&family=Inter:wght@300;400;500;600&display=swap"
+        rel="stylesheet">
+
+    <!-- Three.js (r128) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+    <!-- GSAP & ScrollTrigger -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/ScrollTrigger.min.js"></script>
+
+    <style>
+        :root {
+            --font-display: 'Space Grotesk', sans-serif;
+            --font-sans: 'Inter', sans-serif;
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #06070a;
+            color: #f3f4f6;
+            font-family: var(--font-sans);
+            overflow-x: hidden;
+        }
+
+        h1,
+        h2,
+        h3,
+        .font-display {
+            font-family: var(--font-display);
+        }
+
+        /* Canvas 3D di latar belakang (Fixed) */
+        #webgl-canvas {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: 1;
+            outline: none;
+        }
+
+        /* Kontainer HTML Scrollytelling di atas Canvas */
+        main {
+            position: relative;
+            z-index: 10;
+            /* Penting: pointer-events-none agar Raycaster Three.js tetap bisa mendeteksi hover pada canvas di belakang elemen kosong */
+            pointer-events: none;
+        }
+
+        /* Mengaktifkan kembali interaksi mouse hanya pada kartu/elemen UI */
+        .interactive-ui {
+            pointer-events: auto;
+        }
+
+        /* Efek Glassmorphism untuk Card */
+        .glass-card {
+            background: rgba(15, 18, 28, 0.65);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7);
+        }
+
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: #06070a;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #262936;
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #4f46e5;
+        }
+
+        /* Indikator titik navigasi aktif */
+        .nav-dot.active {
+            background-color: #6366f1;
+            transform: scale(1.4);
+            box-shadow: 0 0 12px #6366f1;
+        }
+    </style>
+</head>
+
+<body class="antialiased selection:bg-indigo-500 selection:text-white">
+
+    <!-- 1. CANVAS THREE.JS -->
+    <canvas id="webgl-canvas"></canvas>
+
+    <!-- 2. HUD & NAVIGASI TETAP (FIXED UI) -->
+    <header class="fixed top-0 left-0 w-full z-50 px-6 py-5 flex justify-between items-center pointer-events-none">
+        <div class="interactive-ui flex items-center gap-3 glass-card px-4 py-2 rounded-full">
+            <span class="w-2.5 h-2.5 rounded-full bg-indigo-500 animate-pulse"></span>
+            <span class="font-display font-bold tracking-wider text-sm uppercase">AETHER // 3D FOLIO</span>
+        </div>
+
+        <!-- HUD Koordinat Kamera Real-time -->
+        <div
+            class="hidden md:flex items-center gap-6 glass-card px-5 py-2 rounded-full text-xs font-mono text-slate-400">
+            <div>CAM X: <span id="hud-x" class="text-indigo-400 font-semibold">0.00</span></div>
+            <div>CAM Y: <span id="hud-y" class="text-indigo-400 font-semibold">1.00</span></div>
+            <div>CAM Z: <span id="hud-z" class="text-indigo-400 font-semibold">10.00</span></div>
+            <div class="border-l border-slate-700 pl-4 text-emerald-400 flex items-center gap-1.5">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122">
+                    </path>
+                </svg>
+                <span>Arahkan kursor ke objek 3D</span>
+            </div>
+        </div>
+
+        <nav class="interactive-ui glass-card px-4 py-2 rounded-full flex gap-4 text-xs font-medium">
+            <a href="#section-hero" class="hover:text-indigo-400 transition-colors">Hero</a>
+            <a href="#section-about" class="hover:text-cyan-400 transition-colors">About</a>
+            <a href="#section-projects" class="hover:text-emerald-400 transition-colors">Projects</a>
+            <a href="#section-contact" class="hover:text-amber-400 transition-colors">Contact</a>
+        </nav>
+    </header>
+
+    <!-- Tooltip Mengambang saat Objek 3D di-hover (Raycaster Feedback) -->
+    <div id="raycast-tooltip"
+        class="fixed z-50 pointer-events-none opacity-0 transition-opacity duration-200 px-3.5 py-2 rounded-lg glass-card border border-indigo-500/40 text-xs font-mono shadow-xl transform -translate-x-1/2 -translate-y-full -mt-3">
+        <div class="text-indigo-300 font-bold" id="tooltip-title">Objek 3D</div>
+        <div class="text-slate-400 text-[10px]" id="tooltip-desc">Interaktif • Skala 1.25x</div>
+    </div>
+
+    <!-- Indikator Progres Scroll di Samping Kanan -->
+    <div class="fixed right-6 top-1/2 -translate-y-1/2 z-40 hidden sm:flex flex-col gap-4 items-center">
+        <a href="#section-hero"
+            class="interactive-ui nav-dot active w-2.5 h-2.5 rounded-full bg-slate-600 transition-all duration-300"
+            title="Hero"></a>
+        <a href="#section-about"
+            class="interactive-ui nav-dot w-2.5 h-2.5 rounded-full bg-slate-600 transition-all duration-300"
+            title="About"></a>
+        <a href="#section-projects"
+            class="interactive-ui nav-dot w-2.5 h-2.5 rounded-full bg-slate-600 transition-all duration-300"
+            title="Projects"></a>
+        <a href="#section-contact"
+            class="interactive-ui nav-dot w-2.5 h-2.5 rounded-full bg-slate-600 transition-all duration-300"
+            title="Contact"></a>
+    </div>
+
+    <!-- 3. KONTEN UTAMA SCROLLYTELLING (4 SECTION) -->
+    <main>
+
+        <!-- ================= SECTION 1: HERO ================= -->
+        <section id="section-hero"
+            class="h-screen w-full flex items-center justify-start px-6 md:px-20 lg:px-32 relative">
+            <div class="interactive-ui glass-card p-8 md:p-10 rounded-3xl max-w-xl border-l-4 border-l-indigo-500">
+                <div
+                    class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/30 text-indigo-400 text-xs font-mono mb-6">
+                    <span>01 // KOORDINAT AWAL</span>
+                    <span>•</span>
+                    <span>POS (0, 1, 10)</span>
+                </div>
+                <h1 class="text-4xl md:text-6xl font-bold tracking-tight leading-none mb-4">
+                    Arsitektur Digital <span
+                        class="text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 to-purple-400">Imersif.</span>
+                </h1>
+                <p class="text-slate-300 text-base md:text-lg leading-relaxed mb-8">
+                    Selamat datang di ruang eksplorasi WebGL. Scroll ke bawah untuk menggerakkan posisi dan rotasi
+                    kamera melewati 4 koordinat stasiun 3D, atau arahkan kursor langsung ke geometri di samping untuk
+                    menguji interaksi <strong>Raycaster</strong>.
+                </p>
+                <div class="flex flex-wrap gap-4 items-center">
+                    <a href="#section-about"
+                        class="px-6 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-medium text-sm transition-all shadow-lg shadow-indigo-600/30 flex items-center gap-2">
+                        <span>Mulai Eksplorasi</span>
+                        <svg class="w-4 h-4 animate-bounce" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M19 14l-7 7m0 0l-7-7m7 7V3"></path>
+                        </svg>
+                    </a>
+                    <span class="text-xs font-mono text-slate-400">Objek: Cyber TorusKnot</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- ================= SECTION 2: ABOUT ================= -->
+        <section id="section-about"
+            class="h-screen w-full flex items-center justify-end px-6 md:px-20 lg:px-32 relative">
+            <div class="interactive-ui glass-card p-8 md:p-10 rounded-3xl max-w-xl border-l-4 border-l-cyan-400">
+                <div
+                    class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-cyan-500/10 border border-cyan-500/30 text-cyan-300 text-xs font-mono mb-6">
+                    <span>02 // TENTANG SAYA</span>
+                    <span>•</span>
+                    <span>POS (14, 4, -5)</span>
+                </div>
+                <h2 class="text-3xl md:text-5xl font-bold tracking-tight mb-4">
+                    Memadukan Seni & <span
+                        class="text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-blue-500">Rekayasa
+                        Kode.</span>
+                </h2>
+                <p class="text-slate-300 text-base leading-relaxed mb-6">
+                    Sebagai Creative Developer, saya berfokus pada pembuatan antarmuka pengguna berbasis fisika, shader
+                    WebGL, dan animasi terprogram. Kamera saat ini berputar menghadap ke kanan menuju kristal
+                    Icosahedron.
+                </p>
+                <div class="grid grid-cols-3 gap-3 text-center font-mono text-xs">
+                    <div class="p-3 rounded-xl bg-slate-900/70 border border-slate-800">
+                        <div class="text-cyan-400 text-lg font-bold">60 FPS</div>
+                        <div class="text-slate-400">Optimasi WebGL</div>
+                    </div>
+                    <div class="p-3 rounded-xl bg-slate-900/70 border border-slate-800">
+                        <div class="text-cyan-400 text-lg font-bold">GSAP 3</div>
+                        <div class="text-slate-400">ScrollTrigger</div>
+                    </div>
+                    <div class="p-3 rounded-xl bg-slate-900/70 border border-slate-800">
+                        <div class="text-cyan-400 text-lg font-bold">3D Ray</div>
+                        <div class="text-slate-400">Mesh Picking</div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ================= SECTION 3: PROJECTS ================= -->
+        <section id="section-projects"
+            class="h-screen w-full flex items-center justify-start px-6 md:px-20 lg:px-32 relative">
+            <div class="interactive-ui glass-card p-8 md:p-10 rounded-3xl max-w-xl border-l-4 border-l-emerald-400">
+                <div
+                    class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs font-mono mb-6">
+                    <span>03 // KARYA PILIHAN</span>
+                    <span>•</span>
+                    <span>POS (-14, -4, -18)</span>
+                </div>
+                <h2 class="text-3xl md:text-5xl font-bold tracking-tight mb-4">
+                    Eksperimen & <span
+                        class="text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 to-teal-300">Proyek
+                        3D.</span>
+                </h2>
+                <p class="text-slate-300 text-base leading-relaxed mb-6">
+                    Di stasiun ketiga ini, terdapat tiga satelit kubus mengelilingi inti Octahedron. Setiap kubus kecil
+                    maupun inti di tengah terdaftar di dalam array Raycaster sehingga semuanya dapat merespons kursor
+                    Anda secara independen.
+                </p>
+                <div class="space-y-3">
+                    <div
+                        class="p-3.5 rounded-xl bg-slate-900/60 border border-slate-800/80 flex justify-between items-center">
+                        <div>
+                            <h4 class="font-semibold text-sm text-emerald-300">01. Nebula Spatial Visualizer</h4>
+                            <p class="text-xs text-slate-400">Three.js Custom Shaders & Audio API</p>
+                        </div>
+                        <span
+                            class="text-xs font-mono px-2.5 py-1 rounded bg-emerald-500/20 text-emerald-300">2025</span>
+                    </div>
+                    <div
+                        class="p-3.5 rounded-xl bg-slate-900/60 border border-slate-800/80 flex justify-between items-center">
+                        <div>
+                            <h4 class="font-semibold text-sm text-emerald-300">02. Chrono Automotive Configurator</h4>
+                            <p class="text-xs text-slate-400">PBR Materials, Raycasting & GSAP</p>
+                        </div>
+                        <span
+                            class="text-xs font-mono px-2.5 py-1 rounded bg-emerald-500/20 text-emerald-300">2024</span>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ================= SECTION 4: CONTACT ================= -->
+        <section id="section-contact"
+            class="h-screen w-full flex items-center justify-end px-6 md:px-20 lg:px-32 relative">
+            <div class="interactive-ui glass-card p-8 md:p-10 rounded-3xl max-w-xl border-l-4 border-l-amber-400">
+                <div
+                    class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs font-mono mb-6">
+                    <span>04 // TRANSMISI KONTAK</span>
+                    <span>•</span>
+                    <span>POS (0, 8, -32)</span>
+                </div>
+                <h2 class="text-3xl md:text-5xl font-bold tracking-tight mb-4">
+                    Mari Bangun Sesuatu <span
+                        class="text-transparent bg-clip-text bg-gradient-to-r from-amber-400 to-orange-500">Bersama.</span>
+                </h2>
+                <p class="text-slate-300 text-base leading-relaxed mb-6">
+                    Kamera kini berada di titik elevasi tertinggi melihat ke arah portal Gyroscope. Kirimkan pesan untuk
+                    mendiskusikan proyek kreatif atau kolaborasi interaktif.
+                </p>
+
+                <form id="contact-form" class="space-y-3"
+                    onsubmit="event.preventDefault(); document.getElementById('form-feedback').classList.remove('hidden');">
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <input type="text" required placeholder="Nama Anda"
+                            class="w-full px-4 py-2.5 rounded-xl bg-slate-900/90 border border-slate-700 text-sm focus:outline-none focus:border-amber-400 transition-colors">
+                        <input type="email" required placeholder="Email"
+                            class="w-full px-4 py-2.5 rounded-xl bg-slate-900/90 border border-slate-700 text-sm focus:outline-none focus:border-amber-400 transition-colors">
+                    </div>
+                    <textarea rows="2" required placeholder="Ceritakan ide proyek 3D Anda..."
+                        class="w-full px-4 py-2.5 rounded-xl bg-slate-900/90 border border-slate-700 text-sm focus:outline-none focus:border-amber-400 transition-colors"></textarea>
+                    <button type="submit"
+                        class="w-full py-3 rounded-xl bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 text-slate-950 font-bold text-sm transition-all shadow-lg shadow-amber-500/20">
+                        Kirim Transmisi Pesan
+                    </button>
+                    <p id="form-feedback" class="hidden text-xs font-mono text-emerald-400 text-center pt-1">
+                        ✓ Transmisi berhasil diterima! Kami akan segera menghubungi Anda.
+                    </p>
+                </form>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- ======================================================================= -->
+    <!-- LOGIKA UTAMA: THREE.JS SCENE, GSAP SCROLLTRIGGER & RAYCASTER            -->
+    <!-- ======================================================================= -->
+    <script>
+        // Mendaftarkan plugin GSAP ScrollTrigger
+        gsap.registerPlugin(ScrollTrigger);
+
+        // ============================================================================
+        // 1. INISIALISASI SCENE, KAMERA, DAN RENDERER THREE.JS
+        // ============================================================================
+        const canvas = document.querySelector('#webgl-canvas');
+        const scene = new THREE.Scene();
+        scene.fog = new THREE.FogExp2(0x06070a, 0.018); // Efek kedalaman ruang
+
+        // Perspektif Kamera
+        const camera = new THREE.PerspectiveCamera(
+            60,
+            window.innerWidth / window.innerHeight,
+            0.1,
+            200
+        );
+
+        // Renderer WebGL
+        const renderer = new THREE.WebGLRenderer({
+            canvas: canvas,
+            antialias: true,
+            powerPreference: 'high-performance'
+        });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 1.2;
+
+        // ============================================================================
+        // 2. PENCAHAYAAN (LIGHTING) & PARTIKEL LATAR
+        // ============================================================================
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+        scene.add(ambientLight);
+
+        const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
+        dirLight.position.set(10, 20, 15);
+        scene.add(dirLight);
+
+        // Lampu titik berwarna di dekat tiap stasiun agar atmosfer lebih dramatis
+        const pointLight1 = new THREE.PointLight(0x6366f1, 4, 25); // Indigo (Hero)
+        pointLight1.position.set(3, 2, 4);
+        scene.add(pointLight1);
+
+        const pointLight2 = new THREE.PointLight(0x06b6d4, 4, 25); // Cyan (About)
+        pointLight2.position.set(18, 5, -10);
+        scene.add(pointLight2);
+
+        const pointLight3 = new THREE.PointLight(0x10b981, 4, 25); // Emerald (Projects)
+        pointLight3.position.set(-10, -3, -24);
+        scene.add(pointLight3);
+
+        const pointLight4 = new THREE.PointLight(0xf59e0b, 4, 25); // Amber (Contact)
+        pointLight4.position.set(-3, 8, -40);
+        scene.add(pointLight4);
+
+        // Grid lantai tipis sebagai referensi spasial pergerakan kamera
+        const gridHelper = new THREE.GridHelper(120, 60, 0x1e293b, 0x0f172a);
+        gridHelper.position.y = -7;
+        scene.add(gridHelper);
+
+        // Partikel Bintang di Latar Belakang
+        const starGeo = new THREE.BufferGeometry();
+        const starCount = 1200;
+        const starPositions = new Float32Array(starCount * 3);
+        for (let i = 0; i < starCount * 3; i++) {
+            starPositions[i] = (Math.random() - 0.5) * 120;
+        }
+        starGeo.setAttribute('position', new THREE.BufferAttribute(starPositions, 3));
+        const starMat = new THREE.PointsMaterial({
+            color: 0x94a3b8,
+            size: 0.12,
+            transparent: true,
+            opacity: 0.7
+        });
+        const stars = new THREE.Points(starGeo, starMat);
+        scene.add(stars);
+
+        // ============================================================================
+        // 3. PEMBUATAN OBJEK 3D INTERAKTIF DI 4 STASIUN (HERO, ABOUT, PROJECTS, CONTACT)
+        // ============================================================================
+        // Array khusus untuk menyimpan objek yang bisa dideteksi oleh Raycaster
+        const interactableObjects = [];
+
+        /**
+         * Fungsi pembantu untuk mendaftarkan Mesh ke dalam Raycaster beserta metadatanya
+         */
+        function registerInteractable(mesh, title, description, hoverScale = 1.25) {
+            mesh.userData = {
+                isInteractable: true,
+                title: title,
+                description: description,
+                baseScale: mesh.scale.clone(),
+                hoverScale: hoverScale,
+                baseEmissiveIntensity: mesh.material.emissiveIntensity || 0.25
+            };
+            interactableObjects.push(mesh);
+        }
+
+        // --- STASIUN 1: HERO OBJECT (Cyber TorusKnot di sebelah kanan teks Hero) ---
+        const heroGroup = new THREE.Group();
+        heroGroup.position.set(3.5, 1, 2);
+        scene.add(heroGroup);
+
+        const heroGeo = new THREE.TorusKnotGeometry(1.5, 0.42, 128, 32);
+        const heroMat = new THREE.MeshStandardMaterial({
+            color: 0x6366f1,
+            emissive: 0x312e81,
+            emissiveIntensity: 0.3,
+            metalness: 0.7,
+            roughness: 0.2
+        });
+        const heroMesh = new THREE.Mesh(heroGeo, heroMat);
+        heroGroup.add(heroMesh);
+
+        // Wireframe pembungkus luar untuk estetika 3D
+        const heroWire = new THREE.Mesh(
+            new THREE.IcosahedronGeometry(2.7, 1),
+            new THREE.MeshBasicMaterial({ color: 0x818cf8, wireframe: true, transparent: true, opacity: 0.18 })
+        );
+        heroGroup.add(heroWire);
+
+        registerInteractable(heroMesh, "01 // Cyber TorusKnot", "Stasiun Hero • Hover Scale 1.25x", 1.25);
+
+        // --- STASIUN 2: ABOUT OBJECT (Faceted Crystal Icosahedron) ---
+        const aboutGroup = new THREE.Group();
+        aboutGroup.position.set(20, 4, -12);
+        scene.add(aboutGroup);
+
+        const aboutGeo = new THREE.IcosahedronGeometry(2.2, 0);
+        const aboutMat = new THREE.MeshStandardMaterial({
+            color: 0x06b6d4,
+            emissive: 0x164e63,
+            emissiveIntensity: 0.35,
+            metalness: 0.4,
+            roughness: 0.15,
+            flatShading: true
+        });
+        const aboutMesh = new THREE.Mesh(aboutGeo, aboutMat);
+        aboutGroup.add(aboutMesh);
+
+        const aboutRing = new THREE.Mesh(
+            new THREE.TorusGeometry(3.2, 0.04, 16, 100),
+            new THREE.MeshBasicMaterial({ color: 0x22d3ee, transparent: true, opacity: 0.5 })
+        );
+        aboutRing.rotation.x = Math.PI / 3;
+        aboutGroup.add(aboutRing);
+
+        registerInteractable(aboutMesh, "02 // Icosahedron Core", "Stasiun About • Geometri Kristal", 1.28);
+
+        // --- STASIUN 3: PROJECTS OBJECT (Octahedron Core + 3 Orbiting Project Cubes) ---
+        const projectsGroup = new THREE.Group();
+        projectsGroup.position.set(-9, -4, -25);
+        scene.add(projectsGroup);
+
+        const projCoreGeo = new THREE.OctahedronGeometry(1.8, 0);
+        const projCoreMat = new THREE.MeshStandardMaterial({
+            color: 0x10b981,
+            emissive: 0x064e3b,
+            emissiveIntensity: 0.35,
+            metalness: 0.6,
+            roughness: 0.2,
+            flatShading: true
+        });
+        const projCoreMesh = new THREE.Mesh(projCoreGeo, projCoreMat);
+        projectsGroup.add(projCoreMesh);
+        registerInteractable(projCoreMesh, "03 // Project Nexus", "Inti Portofolio • Hover Scale 1.25x", 1.25);
+
+        // 3 Kubus Satelit yang mengelilingi Project Core (Masing-masing juga bisa di-hover)
+        const satelliteCubes = [];
+        for (let i = 0; i < 3; i++) {
+            const satGeo = new THREE.BoxGeometry(0.9, 0.9, 0.9);
+            const satMat = new THREE.MeshStandardMaterial({
+                color: 0x34d399,
+                emissive: 0x065f46,
+                emissiveIntensity: 0.3,
+                metalness: 0.5,
+                roughness: 0.25
+            });
+            const satMesh = new THREE.Mesh(satGeo, satMat);
+            const angle = (i / 3) * Math.PI * 2;
+            satMesh.position.set(Math.cos(angle) * 3.4, Math.sin(angle) * 1.5, Math.sin(angle) * 3.4);
+            projectsGroup.add(satMesh);
+            satelliteCubes.push(satMesh);
+            registerInteractable(satMesh, `Proyek Node #0${i + 1}`, "Sub-Modul Interaktif • Scale 1.35x", 1.35);
+        }
+
+        // --- STASIUN 4: CONTACT OBJECT (Golden Gyroscope Portal) ---
+        const contactGroup = new THREE.Group();
+        contactGroup.position.set(-3.5, 6.5, -40);
+        scene.add(contactGroup);
+
+        const contactCoreGeo = new THREE.DodecahedronGeometry(1.7, 0);
+        const contactCoreMat = new THREE.MeshStandardMaterial({
+            color: 0xf59e0b,
+            emissive: 0x78350f,
+            emissiveIntensity: 0.4,
+            metalness: 0.8,
+            roughness: 0.15
+        });
+        const contactMesh = new THREE.Mesh(contactCoreGeo, contactCoreMat);
+        contactGroup.add(contactMesh);
+
+        const gyroRing = new THREE.Mesh(
+            new THREE.TorusGeometry(2.6, 0.12, 16, 64),
+            new THREE.MeshStandardMaterial({
+                color: 0xfbbf24,
+                emissive: 0x92400e,
+                emissiveIntensity: 0.25,
+                metalness: 0.9,
+                roughness: 0.2
+            })
+        );
+        contactGroup.add(gyroRing);
+
+        registerInteractable(contactMesh, "04 // Beacon Core", "Stasiun Kontak • Transmisi Aktif", 1.25);
+        registerInteractable(gyroRing, "04 // Cincin Gyroscope", "Cincin Orbit • Scale 1.18x", 1.18);
+
+
+        // ============================================================================
+        // 4. SKENARIO KOORDINAT KAMERA & GSAP SCROLLTRIGGER (4 SECTION)
+        // ============================================================================
+        /**
+         * Daftar 4 Koordinat Target Kamera (Posisi X,Y,Z & Rotasi X,Y,Z dalam Radian)
+         * Disusun agar setiap section menampilkan objek 3D di sisi ruang yang kosong dari teks HTML.
+         */
+        const cameraWaypoints = [
+            // 1. HERO: Menghadap ke depan, objek Cyber TorusKnot berada di kanan layar
+            {
+                pos: { x: 0, y: 1, z: 10 },
+                rot: { x: 0, y: -0.12, z: 0 }
+            },
+            // 2. ABOUT: Bergerak ke samping & memutar kamera menghadap Crystal Icosahedron (teks di kanan, objek di kiri)
+            {
+                pos: { x: 14, y: 4, z: -5 },
+                rot: { x: -0.05, y: -0.55, z: -0.04 }
+            },
+            // 3. PROJECTS: Menyelam ke ruang bawah kiri menghadap klaster Project Cubes (teks di kiri, objek di kanan)
+            {
+                pos: { x: -14, y: -4, z: -18 },
+                rot: { x: 0.06, y: -0.45, z: 0.04 }
+            },
+            // 4. CONTACT: Naik ke elevasi atas menghadap Gyroscope Portal (teks di kanan, objek di kiri)
+            {
+                pos: { x: 0, y: 8, z: -32 },
+                rot: { x: -0.18, y: 0.18, z: 0 }
+            }
+        ];
+
+        // Set posisi dan rotasi awal kamera sesuai koordinat pertama (Hero)
+        camera.position.set(
+            cameraWaypoints[0].pos.x,
+            cameraWaypoints[0].pos.y,
+            cameraWaypoints[0].pos.z
+        );
+        camera.rotation.set(
+            cameraWaypoints[0].rot.x,
+            cameraWaypoints[0].rot.y,
+            cameraWaypoints[0].rot.z
+        );
+
+        // Elemen HUD untuk menampilkan koordinat kamera secara langsung
+        const hudX = document.getElementById('hud-x');
+        const hudY = document.getElementById('hud-y');
+        const hudZ = document.getElementById('hud-z');
+        const navDots = document.querySelectorAll('.nav-dot');
+
+        function updateCameraHUD() {
+            hudX.textContent = camera.position.x.toFixed(2);
+            hudY.textContent = camera.position.y.toFixed(2);
+            hudZ.textContent = camera.position.z.toFixed(2);
+        }
+
+        // Membuat Master Timeline GSAP yang dikendalikan penuh oleh posisi scroll halaman
+        const masterScrollTimeline = gsap.timeline({
+            scrollTrigger: {
+                trigger: "main",
+                start: "top top",
+                end: "bottom bottom",
+                scrub: 1.2, // Efek smoothing/redaman 1.2 detik agar pergerakan kamera terasa sinematik & halus
+                onUpdate: (self) => {
+                    updateCameraHUD();
+                    // Update indikator titik navigasi di sebelah kanan layar
+                    const activeIndex = Math.min(
+                        cameraWaypoints.length - 1,
+                        Math.round(self.progress * (cameraWaypoints.length - 1))
+                    );
+                    navDots.forEach((dot, idx) => {
+                        dot.classList.toggle('active', idx === activeIndex);
+                    });
+                }
+            }
+        });
+
+        // Menambahkan keyframe transisi berurutan dari Section 1 -> 2 -> 3 -> 4
+        for (let i = 1; i < cameraWaypoints.length; i++) {
+            const target = cameraWaypoints[i];
+
+            // Animasi Posisi Kamera (X, Y, Z)
+            masterScrollTimeline.to(camera.position, {
+                x: target.pos.x,
+                y: target.pos.y,
+                z: target.pos.z,
+                ease: "power2.inOut",
+                duration: 1
+            }, `segment-${i}`);
+
+            // Animasi Rotasi Kamera (X, Y, Z) secara bersamaan (sinkron)
+            masterScrollTimeline.to(camera.rotation, {
+                x: target.rot.x,
+                y: target.rot.y,
+                z: target.rot.z,
+                ease: "power2.inOut",
+                duration: 1
+            }, `segment-${i}`);
+        }
+
+
+        // ============================================================================
+        // 5. SISTEM RAYCASTER (DETEKSI HOVER, SCALE UP & UBAH KURSOR JADI POINTER)
+        // ============================================================================
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2(-999, -999); // Posisi awal di luar layar
+        let currentHoveredObj = null;
+
+        const tooltipEl = document.getElementById('raycast-tooltip');
+        const tooltipTitle = document.getElementById('tooltip-title');
+        const tooltipDesc = document.getElementById('tooltip-desc');
+
+        // Event listener saat kursor bergerak di layar
+        window.addEventListener('mousemove', (event) => {
+            // Konversi koordinat piksel layar ke Normalized Device Coordinates (-1 s/d +1)
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+            // Pindahkan posisi tooltip mengikuti kursor
+            tooltipEl.style.left = `${event.clientX}px`;
+            tooltipEl.style.top = `${event.clientY}px`;
+        });
+
+        /**
+         * Fungsi pengecekan interseksi Raycaster yang dipanggil di dalam requestAnimationFrame
+         */
+        function checkRaycasterIntersections() {
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObjects(interactableObjects, false);
+
+            if (intersects.length > 0) {
+                const hitMesh = intersects[0].object;
+
+                // Jika kursor baru saja menyentuh objek baru
+                if (currentHoveredObj !== hitMesh) {
+                    // Kembalikan ukuran objek sebelumnya jika ada
+                    if (currentHoveredObj) {
+                        resetObjectTransform(currentHoveredObj);
+                    }
+
+                    currentHoveredObj = hitMesh;
+                    const data = currentHoveredObj.userData;
+
+                    // 1. Ubah kursor menjadi pointer
+                    document.body.style.cursor = 'pointer';
+
+                    // 2. Perbesar ukuran objek (Scale Up) secara halus menggunakan GSAP
+                    gsap.to(currentHoveredObj.scale, {
+                        x: data.baseScale.x * data.hoverScale,
+                        y: data.baseScale.y * data.hoverScale,
+                        z: data.baseScale.z * data.hoverScale,
+                        duration: 0.4,
+                        ease: "back.out(2)"
+                    });
+
+                    // Efek tambahan: Tingkatkan intensitas cahaya emissive objek saat di-hover
+                    if (currentHoveredObj.material && 'emissiveIntensity' in currentHoveredObj.material) {
+                        gsap.to(currentHoveredObj.material, {
+                            emissiveIntensity: 0.9,
+                            duration: 0.3
+                        });
+                    }
+
+                    // Tampilkan HUD Tooltip informasi objek
+                    tooltipTitle.textContent = data.title;
+                    tooltipDesc.textContent = data.description;
+                    tooltipEl.classList.remove('opacity-0');
+                }
+            } else {
+                // Jika kursor tidak lagi mengenai objek 3D apa pun
+                if (currentHoveredObj) {
+                    resetObjectTransform(currentHoveredObj);
+                    currentHoveredObj = null;
+
+                    // Kembalikan kursor ke default dan sembunyikan tooltip
+                    document.body.style.cursor = 'default';
+                    tooltipEl.classList.add('opacity-0');
+                }
+            }
+        }
+
+        /**
+         * Mengembalikan skala & cahaya objek 3D ke kondisi semula saat kursor menjauh
+         */
+        function resetObjectTransform(mesh) {
+            const data = mesh.userData;
+            gsap.to(mesh.scale, {
+                x: data.baseScale.x,
+                y: data.baseScale.y,
+                z: data.baseScale.z,
+                duration: 0.35,
+                ease: "power2.out"
+            });
+
+            if (mesh.material && 'emissiveIntensity' in mesh.material) {
+                gsap.to(mesh.material, {
+                    emissiveIntensity: data.baseEmissiveIntensity,
+                    duration: 0.35
+                });
+            }
+        }
+
+
+        // ============================================================================
+        // 6. ANIMATION LOOP (RENDER LOOP & IDLE ANIMATION)
+        // ============================================================================
+        const clock = new THREE.Clock();
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const elapsedTime = clock.getElapsedTime();
+
+            // Animasi rotasi konstan pada setiap stasiun objek agar scene terasa hidup
+            heroMesh.rotation.x = elapsedTime * 0.35;
+            heroMesh.rotation.y = elapsedTime * 0.45;
+            heroWire.rotation.y = -elapsedTime * 0.15;
+            heroGroup.position.y = 1 + Math.sin(elapsedTime * 1.5) * 0.25;
+
+            aboutMesh.rotation.y = elapsedTime * 0.4;
+            aboutMesh.rotation.z = elapsedTime * 0.25;
+            aboutRing.rotation.z = -elapsedTime * 0.5;
+            aboutGroup.position.y = 4 + Math.cos(elapsedTime * 1.3) * 0.3;
+
+            projCoreMesh.rotation.y = -elapsedTime * 0.5;
+            projectsGroup.rotation.y = elapsedTime * 0.2;
+            satelliteCubes.forEach((cube, idx) => {
+                cube.rotation.x = elapsedTime * (0.6 + idx * 0.2);
+                cube.rotation.y = elapsedTime * (0.8 + idx * 0.1);
+            });
+
+            contactMesh.rotation.x = elapsedTime * 0.4;
+            contactMesh.rotation.y = elapsedTime * 0.6;
+            gyroRing.rotation.x = Math.sin(elapsedTime * 0.8) * 1.2;
+            gyroRing.rotation.y = elapsedTime * 0.7;
+
+            // Rotasi lembut partikel bintang
+            stars.rotation.y = elapsedTime * 0.015;
+
+            // Jalankan pengecekan Raycaster setiap frame
+            checkRaycasterIntersections();
+
+            // Render Scene
+            renderer.render(scene, camera);
+        }
+
+        animate();
+
+
+        // ============================================================================
+        // 7. PENANGANAN RESIZE WINDOW (RESPONSIF)
+        // ============================================================================
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        });
+    </script>
+</body>
+
+</html>
